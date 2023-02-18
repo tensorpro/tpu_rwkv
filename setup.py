@@ -18,7 +18,6 @@ setup(
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Science/Research',
-        'License :: OSI Approved :: MIT License',  
         'License :: OSI Approved :: Apache Software License',
         'Environment :: MacOS X',
         'Environment :: Win32 (MS Windows)',
