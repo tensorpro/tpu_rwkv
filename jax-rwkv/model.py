@@ -12,25 +12,33 @@ from config import Config
 
 
 @jax.jit
-def wkv(w, u, k, v):
-    T, C = k.shape
-    time_curve = jnp.arange(-T+2, 1)[jnp.newaxis, ...]
-    k, v = map(jnp.array, [[k], [v]])
-    w = -jnp.exp(w)
-    ek = jnp.exp(k.transpose((0, 2, 1)))
-    ekv = ek * v.transpose((0, 2, 1))
-    ew_time = jnp.expand_dims(jnp.exp(w), 1) * time_curve
-    time_w = jnp.concatenate([ew_time, jnp.expand_dims(u, 1)], axis=1)
-    w = jnp.expand_dims(jnp.exp(time_w), 1)
+def conv1d(x, w):
+    C, T = x.shape
+    x = jnp.pad(x[jnp.newaxis, ...], [(0, 0), (0, 0), (T-1, 0)])
+    return lax.conv_general_dilated(x, w,
+                                    window_strides=(1,),
+                                    padding=[(0, 0)],
+                                    dimension_numbers=('NCW', 'OIW', 'NCW'),
+                                    feature_group_count=C)
 
-    def pad(x): return jnp.pad(x, [(0, 0), (0, 0), (T-1, 0)])
 
-    wkv = lax.conv_general_dilated(pad(ekv), w, (1,), [(
-        0, 0)], dimension_numbers=('NCW', 'OIW', 'NCW'), feature_group_count=C)
-    wk = lax.conv_general_dilated(pad(ek), w, (1,), [(
-        0, 0)], dimension_numbers=('NCW', 'OIW', 'NCW'), feature_group_count=C)
-    return (wkv / wk).transpose(0, 2, 1)[0].T
 
+class WKV(nn.Module):
+
+    @nn.compact
+    def __call__(self, w, u, k, v):
+        T, C = k.shape
+        time_curve = self.variable('cache', 'time_curve', jnp.arange, -T+2, 1).value
+        w = -jnp.exp(w)
+        ek = jnp.exp(k.T)
+        ekv = (ek * v.T)
+        ew_time = jnp.expand_dims(jnp.exp(w), 1) * time_curve
+        time_w = jnp.concatenate([ew_time, jnp.expand_dims(u, 1)], axis=1)
+        w = jnp.expand_dims(jnp.exp(time_w), 1)
+
+        wkv = conv1d(ekv, w)
+        wk = conv1d(ek, w)
+        return (wkv / wk)[0]
 
 @jax.jit
 def time_shift(x):
@@ -63,6 +71,7 @@ class TimeMix(nn.Module):
         zigzag = .5 * (jnp.arange(1, embedding_size+1) % 3 - 1)
         time_first = jnp.full(embedding_size, math.log(.3)) + zigzag
 
+        self.wkv = WKV()
         self.time_first = simple_param(self, 'time_first', time_first)
 
         x = (jnp.arange(embedding_size) /
@@ -96,7 +105,7 @@ class TimeMix(nn.Module):
         v = self.value(xv)
         r = self.receptance(xr)
         sr = jax.nn.sigmoid(r)
-        rwkv = sr * wkv(self.time_decay, self.time_first, k, v).T
+        rwkv = sr * self.wkv(self.time_decay, self.time_first, k, v).T
         rwkv = self.output(rwkv)
         return rwkv
 
@@ -149,7 +158,7 @@ class Block(nn.Module):
         self.mix2 = ChannelMix(config, layer_num)
 
     @nn.jit
-    def __call__(self, x, key=None):
+    def __call__(self, x):
         T, C = x.shape
         x = x + self.mix1(self.layer_norm1(x))
         x = x + self.mix2(self.layer_norm2(x))
@@ -269,4 +278,5 @@ class RWKV(nn.Module):
 
 
 BatchRWKV = nn.vmap(RWKV, in_axes=0, out_axes=0,
-                    variable_axes={'params': None})
+                    variable_axes={'params': None, 'cache':None},
+                    split_rngs={'params': False})

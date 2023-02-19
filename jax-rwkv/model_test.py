@@ -2,9 +2,12 @@ import unittest
 import model
 import torch
 import numpy as np
+from jax.random import PRNGKey
 import convert
 
 device = 'cpu'
+from importlib import reload
+reload(model)
 
 # the jax-rwkv/testdata directoryhas serialized dictionaries, each with the
 # following schema:
@@ -22,7 +25,10 @@ class TestModel(unittest.TestCase):
         test_data = torch.load(f'./jax-rwkv/testdata/small-model-test.pt')
         params, config = convert.rwkv(test_data['model_state_dict'])
         rwkv = model.BatchRWKV(config)
-        jax_out = rwkv.apply(params, test_data['input'].numpy())
+        x = test_data['input'].numpy() # x = [[0,1,2]]
+        params['cache'] = rwkv.init(PRNGKey(0), x)['cache']
+        jax_out = rwkv.apply(params, x)
+
         np.testing.assert_allclose(
             test_data['output'].detach().numpy(), np.array(jax_out), rtol=1e-6)
 
