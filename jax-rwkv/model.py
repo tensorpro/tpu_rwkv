@@ -1,14 +1,8 @@
 import math
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple, Type, Union
+from typing import Any, List, Type, Union
 
-import equinox as eqx
-import flax
 import jax
 import jax.numpy as jnp
-import numpy as np
-import treeo as to
 from flax import linen as nn
 from jax import lax
 from jaxtyping import Array, Float

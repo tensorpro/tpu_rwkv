@@ -2,8 +2,6 @@ import unittest
 import model
 import torch
 import numpy as np
-import jax.numpy as jnp
-import flax.linen as nn
 import convert
 
 device = 'cpu'
