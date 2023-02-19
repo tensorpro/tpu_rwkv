@@ -45,11 +45,12 @@ def time_shift(x):
     return jnp.pad(x, [(1, 0), (0, 0)])[:-1, :]
 
 
-def simple_param(module, name, value):
-    def initializer(ignored_rng_key):
-        return value
-    return module.param(name, init_fn=initializer)
-
+def initialize_to_value(x):
+    """
+    makes an initializer function that ignores the given PRNGKey
+    and always returns the given value
+    """
+    return lambda _: x
 
 class TimeMix(nn.Module):
     config: Config
@@ -70,27 +71,27 @@ class TimeMix(nn.Module):
         ratio_1_to_almost_0 = 1.0 - (layer_depth / num_layers)
         zigzag = .5 * (jnp.arange(1, embedding_size+1) % 3 - 1)
         time_first = jnp.full(embedding_size, math.log(.3)) + zigzag
-
-        self.wkv = WKV()
-        self.time_first = simple_param(self, 'time_first', time_first)
+        self.time_first = self.param('time_first', initialize_to_value(time_first))
 
         x = (jnp.arange(embedding_size) /
              embedding_size)[jnp.newaxis, :]
-        self.time_mix_k = simple_param(
-            self, 'time_mix_k', jnp.power(x, ratio_1_to_almost_0))
-        self.time_mix_v = simple_param(
-            self, 'time_mix_v', self.time_mix_k + .3 * ratio_0_to_1)
-        self.time_mix_r = simple_param(
-            self, 'time_mix_r', jnp.power(x, .5 * ratio_1_to_almost_0))
+        time_mix_k = jnp.power(x, ratio_1_to_almost_0)
+        time_mix_v = time_mix_k + .3 * ratio_0_to_1
+        time_mix_r = jnp.power(x, .5 * ratio_1_to_almost_0)
+
+        self.time_mix_k = self.param('time_mix_k', initialize_to_value(time_mix_k))
+        self.time_mix_v = self.param('time_mix_v', initialize_to_value(time_mix_v))
+        self.time_mix_r = self.param('time_mix_r', initialize_to_value(time_mix_r))
 
         h = jnp.arange(0, embedding_size)
         decay_speed = -5 + 8 * (h / (embedding_size - 1)
                                 ) ** (.7 + 1.3 * ratio_0_to_1)
-        self.time_decay = simple_param(self, 'time_decay', decay_speed)
+        self.time_decay = self.param('time_decay', initialize_to_value(decay_speed))
         self.key = nn.Dense(embedding_size, use_bias=False)
         self.value = nn.Dense(embedding_size, use_bias=False)
         self.receptance = nn.Dense(embedding_size, use_bias=False)
         self.output = nn.Dense(embedding_size, use_bias=False)
+        self.wkv = WKV()
 
     @nn.jit
     def __call__(self, x):
