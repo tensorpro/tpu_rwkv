@@ -6,8 +6,6 @@ from jax.random import PRNGKey
 import convert
 
 device = 'cpu'
-from importlib import reload
-reload(model)
 
 # the jax-rwkv/testdata directoryhas serialized dictionaries, each with the
 # following schema:
