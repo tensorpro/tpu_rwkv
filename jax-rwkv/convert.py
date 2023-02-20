@@ -10,7 +10,7 @@ I'm using this to make test cases validating the equivalence of torch
 vs jax implementations.
 """
 import jax.numpy as jnp
-from config import Config
+from model import Config
 
 def param_to_np_array(torch_param):
     return torch_param.detach().numpy()
