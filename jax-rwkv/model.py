@@ -22,34 +22,36 @@ class Config:
     channel_mix_at_input: bool = False
 
 
+def wkv_single_channel(wc, uc, kc, vc, state_in_c=(0,0,-jnp.inf)):
+    """
+    credit for this kernel: github.com/BlealTan
+    """
+
+    def step(pqo, kct_vct):
+        kct, vct = kct_vct
+
+        p, q, o = pqo
+        no = jnp.maximum(o, uc + kct)
+        A = jnp.exp(o - no)
+        B = jnp.exp(uc + kct - no)
+        y = (A * p + B * vct) / (A * q + B)
+
+        no = jnp.maximum(wc + o, kct)
+        A = jnp.exp(wc + o - no)
+        B = jnp.exp(kct - no)
+        p = A * p + B * vct
+        q = A * q + B
+        o = no
+
+        return (p, q, o), y
+
+    state_out_c, y = jax.lax.scan(step, state_in_c, (kc, vc))
+    return y, state_out_c
+
 @jax.jit
-def conv1d(x, w):
-    C, T = x.shape
-    x = jnp.pad(x[jnp.newaxis, ...], [(0, 0), (0, 0), (T-1, 0)])
-    return lax.conv_general_dilated(x, w,
-                                    window_strides=(1,),
-                                    padding=[(0, 0)],
-                                    dimension_numbers=('NCW', 'OIW', 'NCW'),
-                                    feature_group_count=C)
-
-
-
-class WKV(nn.Module):
-
-    @nn.compact
-    def __call__(self, w, u, k, v):
-        T, C = k.shape
-        time_curve = self.variable('cache', 'time_curve', jnp.arange, -T+2, 1).value
-        w = -jnp.exp(w)
-        ek = jnp.exp(k.T)
-        ekv = (ek * v.T)
-        ew_time = jnp.expand_dims(jnp.exp(w), 1) * time_curve
-        time_w = jnp.concatenate([ew_time, jnp.expand_dims(u, 1)], axis=1)
-        w = jnp.expand_dims(jnp.exp(time_w), 1)
-
-        wkv = conv1d(ekv, w)
-        wk = conv1d(ek, w)
-        return (wkv / wk)[0]
+def wkv(w,u,k,v):
+    w = -jnp.exp(w)
+    return jax.vmap(wkv_single_channel, -1, -1)(w,u,k,v)[0]
 
 @jax.jit
 def time_shift(x):
@@ -102,7 +104,6 @@ class TimeMix(nn.Module):
         self.value = nn.Dense(embedding_size, use_bias=False)
         self.receptance = nn.Dense(embedding_size, use_bias=False)
         self.output = nn.Dense(embedding_size, use_bias=False)
-        self.wkv = WKV()
 
     @nn.jit
     def __call__(self, x):
@@ -117,7 +118,7 @@ class TimeMix(nn.Module):
         v = self.value(xv)
         r = self.receptance(xr)
         sr = jax.nn.sigmoid(r)
-        rwkv = sr * self.wkv(self.time_decay, self.time_first, k, v).T
+        rwkv = sr * wkv(self.time_decay, self.time_first, k, v).T
         rwkv = self.output(rwkv)
         return rwkv
 
