@@ -118,7 +118,7 @@ class TimeMix(nn.Module):
         v = self.value(xv)
         r = self.receptance(xr)
         sr = jax.nn.sigmoid(r)
-        rwkv = sr * wkv(self.time_decay, self.time_first, k, v).T
+        rwkv = sr * wkv(self.time_decay, self.time_first, k, v)
         rwkv = self.output(rwkv)
         return rwkv
 
