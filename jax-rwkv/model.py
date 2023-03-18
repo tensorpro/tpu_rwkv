@@ -1,24 +1,72 @@
 import math
-from dataclasses import dataclass
-from typing import Any, List, Type, Union
+from dataclasses import dataclass, field
+from typing import Any, List, Type, Union, Optional
 
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
 
+
+
 @dataclass
 class Config:
-    num_layers: int = 2
-    embedding_size: int = 2
-    pos_embedding_size: int = 0
-    vocab_size: int = 3
-    context_length: int = 3
-    attention_at_layer: int = 3
-    attention_size: int = 3
-    head_qk_size: int = 0
-    grad_cp: bool = False
-    channel_mix_at_input: bool = False
-    dtype: str = 'bfloat16'
+    """
+    Arguments pertaining to which model/config/tokenizer we are going to fine-tune, or train from scratch.
+    """
+
+    model_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
+            )
+        },
+    )
+    embedding_size: int = field(
+        default=1024,
+        metadata={"help": "The size of the embedding dimension"},
+    )
+    num_layers: int = field(
+        default=10,
+        metadata={"help": "The number of block layers in the model."},
+    )
+    vocab_size: int = field(
+        default=0,
+        metadata={"help": "(Only for vision experiments): size of vocabulary"},
+    )
+    context_length: int = field(
+        default=1024,
+        metadata={"help": "The number of tokens in the context"},
+    )
+    attention_at_layer: int = field(
+        default=-1,
+        metadata={"help": "which layer we should add a small attention too. If negative, no attention is included."},
+    )
+    attention_size: int = field(
+        default=-1,
+        metadata={"help": "Size of the optional attention."},
+    )
+    head_qk_size: int = field(
+        default=0,
+        metadata={"help": "Size of the head QK"},
+    )
+    channel_mix_at_input: bool = field(
+        default=False,
+        metadata={"help": "whether we should use a channel mix instead of time mix at the input"},
+    )
+    pos_embedding_size: int = field(
+        default=0,
+        metadata={"help": "(Only for vision experiments): size of position embedding"},
+    )
+    dtype: Optional[str] = field(
+        default="bfloat16",
+        metadata={
+            "help": (
+                "Floating-point format in which the model weights should be initialized and trained. Choose one of"
+                " `[float32, float16, bfloat16]`."
+            )
+        },
+    )
 
 
 def wkv_single_channel(wc, uc, kc, vc, state_in_c=(0,0,-jnp.inf)):
