@@ -20,6 +20,7 @@ class Config:
     head_qk_size: int = 0
     grad_cp: bool = False
     channel_mix_at_input: bool = False
+    dtype: str = 'bfloat16'
 
 
 def wkv_single_channel(wc, uc, kc, vc, state_in_c=(0,0,-jnp.inf)):
@@ -58,12 +59,12 @@ def time_shift(x):
     return jnp.pad(x, [(1, 0), (0, 0)])[:-1, :]
 
 
-def initialize_to_value(x):
+def initialize_to_value(x, dtype):
     """
     makes an initializer function that ignores the given PRNGKey
     and always returns the given value
     """
-    return lambda _: x
+    return lambda _: x.astype(dtype)
 
 class TimeMix(nn.Module):
     config: Config
@@ -84,7 +85,7 @@ class TimeMix(nn.Module):
         ratio_1_to_almost_0 = 1.0 - (layer_depth / num_layers)
         zigzag = .5 * (jnp.arange(1, embedding_size+1) % 3 - 1)
         time_first = jnp.full(embedding_size, math.log(.3)) + zigzag
-        self.time_first = self.param('time_first', initialize_to_value(time_first))
+        self.time_first = self.param('time_first', initialize_to_value(time_first, config.dtype))
 
         x = (jnp.arange(embedding_size) /
              embedding_size)[jnp.newaxis, :]
@@ -92,18 +93,18 @@ class TimeMix(nn.Module):
         time_mix_v = time_mix_k + .3 * ratio_0_to_1
         time_mix_r = jnp.power(x, .5 * ratio_1_to_almost_0)
 
-        self.time_mix_k = self.param('time_mix_k', initialize_to_value(time_mix_k))
-        self.time_mix_v = self.param('time_mix_v', initialize_to_value(time_mix_v))
-        self.time_mix_r = self.param('time_mix_r', initialize_to_value(time_mix_r))
+        self.time_mix_k = self.param('time_mix_k', initialize_to_value(time_mix_k, config.dtype))
+        self.time_mix_v = self.param('time_mix_v', initialize_to_value(time_mix_v, config.dtype))
+        self.time_mix_r = self.param('time_mix_r', initialize_to_value(time_mix_r, config.dtype))
 
         h = jnp.arange(0, embedding_size)
         decay_speed = -5 + 8 * (h / (embedding_size - 1)
                                 ) ** (.7 + 1.3 * ratio_0_to_1)
-        self.time_decay = self.param('time_decay', initialize_to_value(decay_speed))
-        self.key = nn.Dense(embedding_size, use_bias=False)
-        self.value = nn.Dense(embedding_size, use_bias=False)
-        self.receptance = nn.Dense(embedding_size, use_bias=False)
-        self.output = nn.Dense(embedding_size, use_bias=False)
+        self.time_decay = self.param('time_decay', initialize_to_value(decay_speed, config.dtype))
+        self.key = nn.Dense(embedding_size, use_bias=False, dtype=config.dtype)
+        self.value = nn.Dense(embedding_size, use_bias=False, dtype=config.dtype)
+        self.receptance = nn.Dense(embedding_size, use_bias=False, dtype=config.dtype)
+        self.output = nn.Dense(embedding_size, use_bias=False, dtype=config.dtype)
 
     @nn.jit
     def __call__(self, x):
@@ -140,9 +141,9 @@ class ChannelMix(nn.Module):
         self.time_mix_r = jnp.power(x, ratio_1_to_almost0)
 
         hidden_size = 4 * embedding_size
-        self.key = nn.Dense(hidden_size, use_bias=False)
-        self.receptance = nn.Dense(embedding_size, use_bias=False)
-        self.value = nn.Dense(embedding_size, use_bias=False)
+        self.key = nn.Dense(hidden_size, use_bias=False, dtype=config.dtype)
+        self.receptance = nn.Dense(embedding_size, use_bias=False, dtype=config.dtype)
+        self.value = nn.Dense(embedding_size, use_bias=False, dtype=config.dtype)
 
     @nn.jit
     def __call__(self, x):
@@ -165,8 +166,8 @@ class Block(nn.Module):
         config, layer_num = self.config, self.layer_num
         embedding_size = config.embedding_size
         position_embedding_size = config.pos_embedding_size
-        self.layer_norm1 = nn.LayerNorm(epsilon=1e-5)
-        self.layer_norm2 = nn.LayerNorm(epsilon=1e-5)
+        self.layer_norm1 = nn.LayerNorm(epsilon=1e-5, dtype=config.dtype)
+        self.layer_norm2 = nn.LayerNorm(epsilon=1e-5, dtype=config.dtype)
         self.mix1 = self.mix1_type(config, layer_num)
         self.mix2 = ChannelMix(config, layer_num)
 
@@ -182,13 +183,14 @@ class TinyAttention(nn.Module):
     config: Config
 
     def setup(self):
-        embedding_size, attention_size = self.config.embedding_size, self.config.attention_size
-        self.layernorm = nn.LayerNorm(epsilon=1e-5)
+        config = self.config
+        embedding_size, attention_size = config.embedding_size, config.attention_size
+        self.layernorm = nn.LayerNorm(epsilon=1e-5, dtype=config.dtype)
         self.mask = jnp.tril(
             jnp.ones((self.config.context_length, self.config.context_length))) == 1
-        self.q = nn.Dense(attention_size, use_bias=False)
-        self.k = nn.Dense(attention_size, use_bias=False)
-        self.v = nn.Dense(embedding_size, use_bias=False)
+        self.q = nn.Dense(attention_size, use_bias=False, dtype=config.dtype)
+        self.k = nn.Dense(attention_size, use_bias=False, dtype=config.dtype)
+        self.v = nn.Dense(embedding_size, use_bias=False, dtype=config.dtype)
 
     @nn.jit
     def __call__(self, x, x_emb):
@@ -226,9 +228,10 @@ class HeadQK(nn.Module):
     config: Config
 
     def setup(self):
-        self.head_q = nn.Dense(self.config.head_qk_size, use_bias=False)
-        self.head_k = nn.Dense(self.config.head_qk_size, use_bias=False)
-        context_length = self.config.context_length
+        config = self.config
+        context_length = config.context_length
+        self.head_q = nn.Dense(self.config.head_qk_size, use_bias=False, dtype=config.dtype)
+        self.head_k = nn.Dense(self.config.head_qk_size, use_bias=False, dtype=config.dtype)
         self.copy_mask = jnp.tril(
             jnp.ones((context_length, context_length))) == 1
 
@@ -249,8 +252,8 @@ class RWKV(nn.Module):
 
     def setup(self):
         config = self.config
-        self.emb = nn.Embed(config.vocab_size, config.embedding_size)
-        self.ln_in = nn.LayerNorm(epsilon=1e-5)
+        self.emb = nn.Embed(config.vocab_size, config.embedding_size, dtype=config.dtype)
+        self.ln_in = nn.LayerNorm(epsilon=1e-5, dtype=config.dtype)
 
         if 0 <= config.attention_at_layer < config.num_layers:
             self.tiny_attention = TinyAttention(config)
@@ -261,8 +264,8 @@ class RWKV(nn.Module):
             blocks.append(Block(config, i, mix))
         self.blocks = blocks
 
-        self.ln_out = nn.LayerNorm(epsilon=1e-5)
-        self.head = nn.Dense(config.vocab_size, use_bias=False)
+        self.ln_out = nn.LayerNorm(epsilon=1e-5, dtype=config.dtype)
+        self.head = nn.Dense(config.vocab_size, use_bias=False, dtype=config.dtype)
 
         # self.head_qk = lambda *_: 0.
         if config.head_qk_size > 0:
