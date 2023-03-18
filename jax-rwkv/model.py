@@ -5,8 +5,6 @@ from typing import Any, List, Type, Union
 import jax
 import jax.numpy as jnp
 from flax import linen as nn
-from jax import lax
-from jaxtyping import Array, Float
 
 @dataclass
 class Config:
@@ -294,5 +292,5 @@ class RWKV(nn.Module):
 
 
 BatchRWKV = nn.vmap(RWKV, in_axes=0, out_axes=0,
-                    variable_axes={'params': None, 'cache':None},
+                    variable_axes={'params': None},
                     split_rngs={'params': False})
