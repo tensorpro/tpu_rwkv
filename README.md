@@ -1,2 +1,3 @@
 # TPU  RWKV Implementations
-This repo has early work in porting RWKV to jax, and will also add a torch version that runs on tpus.
+This repo has a port of RWKV to jax that can run on tpus.
+This work was supported by TRC.
